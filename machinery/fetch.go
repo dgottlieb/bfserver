@@ -8,8 +8,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// TODO: Make the execution parsing robust to the paramter not existing.
+var taskFromUrlRe *regexp.Regexp = regexp.MustCompile("com/task/(.*?)/.*?(?:execution=(\\d+))")
+
+func GetTaskFromUrl(url string) string {
+	// Inp: https://spruce.mongodb.com/task/mongodb_mongo_master_enterprise_rhel_80_64_bit_dynamic_all_feature_flags_required_concurrency_simultaneous_4_linux_enterprise_patch_9c65140283c3f72330a94e58bd9ac2c5bd090ced_63e54b7e9ccd4e19c98bf4c6_23_02_10_19_28_57/files?execution=0&sortBy=STATUS&sortDir=ASC
+	//
+	// Out: mongodb_mongo_master_enterprise_rhel_80_64_bit_dynamic_all_feature_flags_required_concurrency_simultaneous_4_linux_enterprise_patch_9c65140283c3f72330a94e58bd9ac2c5bd090ced_63e54b7e9ccd4e19c98bf4c6_23_02_10_19_28_57
+
+	// TODO: Build a model that supports the execution number.
+	return taskFromUrlRe.FindStringSubmatch(url)[1]
+}
 
 func Untar(tarball, target string) error {
 	reader, err := os.Open(tarball)

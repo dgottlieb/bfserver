@@ -1,0 +1,13 @@
+<html>
+  <body>
+    DBPaths:
+    <ul>
+      {{ $taskName := .Name }}
+      {{ range .DBPaths }}
+      <li><a href="printlog?task={{ $taskName }}&dbpath={{ . }}">{{ . }}/</a></li>
+      {{ else }}
+      No DBPaths
+      {{ end }}
+    </ul>
+  </body>
+</html>
