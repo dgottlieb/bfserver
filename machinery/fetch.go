@@ -157,7 +157,7 @@ func FetchArtifactsForTask(task string, target string) []string {
 		}
 
 		if dir.Name() == "WiredTiger" {
-			dbpaths = append(dbpaths, target+"dbpath/"+filepath.Dir(path))
+			dbpaths = append(dbpaths, "dbpath/"+filepath.Dir(path))
 		}
 		return nil
 	})

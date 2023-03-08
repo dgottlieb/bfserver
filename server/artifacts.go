@@ -34,14 +34,90 @@ func init() {
 	loadTemplates()
 }
 
+type ArtifactPath struct {
+	PhysicalPath string
+	LogicalPath  string
+}
+
+// The LogicalPath will be relative to the `taskState.DownloadDir.PhysicalPath`.
+func (taskState *TaskState) GetArtifactPath(taskRelativePath string) ArtifactPath {
+	absolutePath, err := filepath.Abs(taskState.DownloadDir + "/" + taskRelativePath)
+	if err != nil {
+		panic(err)
+	}
+
+	return taskState.GetArtifactPathFromSystemPath(absolutePath)
+}
+
+// The LogicalPath will be relative to the `taskState.DownloadDir.PhysicalPath`.
+func (taskState *TaskState) GetArtifactPathFromSystemPath(systemPath string) ArtifactPath {
+	// A system path may be absolute or relative to the CWD.
+	absolutePath, err := filepath.Abs(systemPath)
+	if err != nil {
+		panic(err)
+	}
+
+	// fmt.Printf("Cutting.\n\tsystemPath: %v\n\tabsolutePath: %v\n\tDownload: %v\n",
+	//  	systemPath, absolutePath, taskState.DownloadDir)
+	_, logicalPath, found := strings.Cut(absolutePath, taskState.DownloadDir)
+	if !found {
+		panic(fmt.Sprintf("Cut not found. SystemPath: %v AbsPath: %v TaskDir: %+v",
+			systemPath, absolutePath, taskState.DownloadDir))
+	}
+
+	return ArtifactPath{absolutePath, logicalPath}
+}
+
+func (taskState *TaskState) FindArtifactPath(logicalDBPath string) (ArtifactPath, error) {
+	for _, dbinfo := range taskState.DBInfo {
+		if dbinfo.DBPath.LogicalPath == logicalDBPath {
+			return dbinfo.DBPath, nil
+		}
+	}
+
+	return ArtifactPath{}, fmt.Errorf("Unknown dbpath. logicalDBPath: %v", logicalDBPath)
+}
+
+// The LogicalPath will be relative to the `artifacts.absolutePath`.
+func (artifacts *Artifacts) FromPhysicalPath(systemPath string) ArtifactPath {
+	// A system path may be absolute or relative to the CWD.
+	absolutePath, err := filepath.Abs(systemPath)
+	if err != nil {
+		panic(err)
+	}
+
+	_, logicalPath, found := strings.Cut(absolutePath, artifacts.absolutePath)
+	if !found {
+		panic(fmt.Sprintf("Cut not found. SystemPath: %v AbsPath: %v ArtifactsDir: %+v", systemPath, absolutePath, artifacts.absolutePath))
+	}
+
+	return ArtifactPath{absolutePath, logicalPath}
+}
+
+func (artifacts *Artifacts) FromLogicalPath(logicalPath string) ArtifactPath {
+	relativePath := fmt.Sprintf("%s/%s", artifacts.absolutePath, logicalPath)
+	absolutePath, err := filepath.Abs(relativePath)
+	if err != nil {
+		panic(err)
+	}
+
+	return ArtifactPath{absolutePath, logicalPath}
+}
+
+type DBInfo struct {
+	DBPath     ArtifactPath
+	WtDiagPath ArtifactPath
+}
+
 type TaskState struct {
-	Name        string
-	DBPaths     []string
+	Name   string
+	DBInfo []DBInfo
+	// DownloadDir ArtifactPath
 	DownloadDir string
 }
 
-func CreateManifestFile(downloadDir, taskName string, dbpaths []string) error {
-	manifestFile, err := os.Create(fmt.Sprintf("%s/MANIFEST", downloadDir))
+func CreateNewManifestFile(downloadDir, taskName string, dbpaths []string) error {
+	manifestFile, err := os.Create(downloadDir + "MANIFEST")
 	if err != nil {
 		return err
 	}
@@ -57,10 +133,39 @@ func CreateManifestFile(downloadDir, taskName string, dbpaths []string) error {
 	return nil
 }
 
-func LoadManifestFile(walkDirPath string, manifestDirEntry fs.DirEntry) (*TaskState, error) {
-	ret := &TaskState{DownloadDir: filepath.Dir(walkDirPath)}
+func CreateManifestFile(taskState *TaskState) error {
+	manifestFile, err := os.Create(taskState.DownloadDir + "MANIFEST")
+	if err != nil {
+		return err
+	}
+	defer manifestFile.Close()
 
-	manifestFile, err := os.Open(walkDirPath)
+	manifestFile.WriteString(taskState.Name)
+	manifestFile.WriteString("\n")
+	for _, dbinfo := range taskState.DBInfo {
+		manifestFile.WriteString(dbinfo.DBPath.LogicalPath)
+		if len(dbinfo.WtDiagPath.LogicalPath) > 0 {
+			manifestFile.WriteString(" ")
+			manifestFile.WriteString(dbinfo.WtDiagPath.LogicalPath)
+		}
+		manifestFile.WriteString("\n")
+	}
+
+	return nil
+}
+
+func (artifacts *Artifacts) LoadManifestFile(manifestPath string) (*TaskState, error) {
+	absManifestPath, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return nil, errors.Wrap(
+			err,
+			fmt.Sprintf("Unable to make absolute path from manifest path. Path: %v", manifestPath))
+	}
+
+	taskState := &TaskState{DownloadDir: filepath.Dir(absManifestPath) + "/"}
+	// fmt.Printf("TaskPath: %v\n", taskState.DownloadDir)
+
+	manifestFile, err := os.Open(manifestPath)
 	if err != nil {
 		return nil, err
 	}
@@ -70,21 +175,60 @@ func LoadManifestFile(walkDirPath string, manifestDirEntry fs.DirEntry) (*TaskSt
 	scanner.Split(bufio.ScanLines)
 
 	scanner.Scan()
-	ret.Name = scanner.Text()
+	taskState.Name = scanner.Text()
 	for scanner.Scan() {
-		ret.DBPaths = append(ret.DBPaths, scanner.Text())
+		// The input string here may be formatted as `dbpath` or `dbpath wtDiagPath`:
+		//   A string formatted as only `dbpath` should return `("dbpath", "")`.
+		//   A string formatted as `dbpath wtDiagPath` should return `("dbpath", "wtDiagPath")`.
+		dbpath, wtDiagPath, _ := strings.Cut(scanner.Text(), " ")
+		toAdd := DBInfo{
+			DBPath: taskState.GetArtifactPath(dbpath),
+		}
+		if len(wtDiagPath) > 0 {
+			toAdd.WtDiagPath = taskState.GetArtifactPath(wtDiagPath)
+		}
+		taskState.DBInfo = append(taskState.DBInfo, toAdd)
 	}
 
-	return ret, nil
+	return taskState, nil
+}
+
+func AddWtDiagToManifestFile(taskState *TaskState, dbpath, wtDiagPath ArtifactPath) error {
+	found := false
+	for idx, dbinfo := range taskState.DBInfo {
+		if dbinfo.DBPath.LogicalPath == dbpath.LogicalPath {
+			taskState.DBInfo[idx].WtDiagPath = wtDiagPath
+			found = true
+		}
+	}
+	if !found {
+		panic(fmt.Sprintf("not found. dbpath: %s wtDiagPath: %s example path: %s", dbpath, wtDiagPath, taskState.DBInfo[0].DBPath))
+	}
+
+	if err := CreateManifestFile(taskState); err != nil {
+		return errors.Wrap(err, "Failed to rewrite the manifest file")
+	}
+
+	return nil
+}
+
+func GetWtDiagPath(taskState *TaskState, dbpath ArtifactPath) string {
+	for _, dbinfo := range taskState.DBInfo {
+		if dbinfo.DBPath.LogicalPath == dbpath.LogicalPath && dbinfo.WtDiagPath.LogicalPath != "" {
+			return fmt.Sprintf("%s/printlog", dbinfo.WtDiagPath.PhysicalPath)
+		}
+	}
+
+	return ""
 }
 
 func (taskState *TaskState) FullDBPath(dbpath string) string {
-	return fmt.Sprintf("%s/%s", taskState.DownloadDir, dbpath)
+	return taskState.DownloadDir + dbpath
 }
 
 type Artifacts struct {
-	dir        string
-	tasksCache map[string]*TaskState
+	absolutePath string
+	tasksCache   map[string]*TaskState
 }
 
 func LoadArtifacts(artifactsDir string) (*Artifacts, error) {
@@ -92,23 +236,33 @@ func LoadArtifacts(artifactsDir string) (*Artifacts, error) {
 		return nil, errors.Wrap(err, "Failed to create artifacts repository directory")
 	}
 
-	taskCache := make(map[string]*TaskState)
+	absolutePath, err := filepath.Abs(artifactsDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to get an absolute path for the artifacts repository directory")
+	}
+
+	ret := &Artifacts{
+		absolutePath: absolutePath,
+		tasksCache:   make(map[string]*TaskState),
+	}
+
 	filepath.WalkDir(artifactsDir, func(path string, dir fs.DirEntry, err error) error {
 		if dir.Name() != "MANIFEST" {
 			return nil
 		}
 
-		taskState, err := LoadManifestFile(path, dir)
+		taskState, err := ret.LoadManifestFile(path)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("TaskState: %+v\n", taskState)
-		taskCache[taskState.Name] = taskState
+		// fmt.Printf("TaskState: %+v\n", taskState)
+		ret.tasksCache[taskState.Name] = taskState
 		return nil
 	})
 
-	return &Artifacts{artifactsDir, taskCache}, nil
+	fmt.Printf("Artifacts Loaded: %+v\n", ret)
+	return ret, nil
 }
 
 func (artifacts *Artifacts) DownloadFromURL(taskUrl string) (*TaskState, error) {
@@ -116,17 +270,33 @@ func (artifacts *Artifacts) DownloadFromURL(taskUrl string) (*TaskState, error) 
 }
 
 func (artifacts *Artifacts) DownloadTask(taskName string) (*TaskState, error) {
-	downloadDir, err := os.MkdirTemp(artifacts.dir, "taskid_")
+	downloadDir, err := os.MkdirTemp(artifacts.absolutePath, "taskid_")
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create directory for task artifacts")
 	}
+	if !strings.HasSuffix(downloadDir, "/") {
+		downloadDir = downloadDir + "/"
+	}
 
-	dbpaths := machinery.FetchArtifactsForTask(taskName, fmt.Sprintf("%s/", downloadDir))
-	if err = CreateManifestFile(downloadDir, taskName, dbpaths); err != nil {
+	dbpaths := machinery.FetchArtifactsForTask(taskName, downloadDir)
+	if err = CreateNewManifestFile(downloadDir, taskName, dbpaths); err != nil {
 		panic(err)
 	}
-	fmt.Println("Downloaded. DBPaths:", dbpaths)
-	ret := &TaskState{taskName, dbpaths, downloadDir}
+
+	ret := &TaskState{
+		Name:        taskName,
+		DownloadDir: downloadDir,
+	}
+	dbinfos := make([]DBInfo, len(dbpaths))
+	for idx, path := range dbpaths {
+		// fmt.Println("\tHaveDBPath:", path)
+		dbinfos[idx] = DBInfo{
+			DBPath:     ret.GetArtifactPath(path),
+			WtDiagPath: ArtifactPath{},
+		}
+	}
+	ret.DBInfo = dbinfos
+	// fmt.Printf("Downloaded.\n\tDownloadPath: %v\n\tDBPaths: %v\n\tDBInfos: %v\n", downloadDir, dbpaths, dbinfos)
 	artifacts.tasksCache[taskName] = ret
 	return ret, nil
 }
@@ -139,11 +309,29 @@ func (artifacts *Artifacts) EnsureEvgArtifacts(taskName string) (*TaskState, err
 	return artifacts.DownloadTask(taskName)
 }
 
-func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath string) (string, error) {
-	fullPath := taskState.FullDBPath(dbpath)
-	wtDiagCmd := machinery.NewWTDiagnostics(fullPath, taskState.DownloadDir)
+func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath ArtifactPath) (string, error) {
+	if ret := GetWtDiagPath(taskState, dbpath); ret != "" {
+		// Returns the `wtDiagPath/printlog` file.
+		return ret, nil
+	}
+
+	systemWtDiagPath, err := os.MkdirTemp(taskState.DownloadDir, "wtDiag_")
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to create a WT diagnostics directory")
+	}
+	if !strings.HasSuffix(systemWtDiagPath, "/") {
+		systemWtDiagPath = systemWtDiagPath + "/"
+	}
+
+	wtDiagCmd := machinery.NewWTDiagnostics(dbpath.PhysicalPath, systemWtDiagPath)
 	diagResults, err := wtDiagCmd.Run()
 	if err != nil {
+		panic(err)
+	}
+
+	// Also modifies TaskState to reflect `wtDiagDir`.
+	if err := AddWtDiagToManifestFile(
+		taskState, dbpath, taskState.GetArtifactPathFromSystemPath(systemWtDiagPath)); err != nil {
 		panic(err)
 	}
 
@@ -165,7 +353,7 @@ func handle404(resp http.ResponseWriter, req *http.Request) {
 }
 
 func (artifacts *Artifacts) ForwardTaskDownload(resp http.ResponseWriter, req *http.Request) {
-	fmt.Printf("Url: %s\n\tPath: %s\n\tRawPath: %s\n", req.URL, req.URL.Path, req.URL.RawPath)
+	// fmt.Printf("Url: %s\n\tPath: %s\n\tRawPath: %s\n", req.URL, req.URL.Path, req.URL.RawPath)
 	if req.URL.Path == "/" {
 		resp.Header().Add("Location", "/task_download")
 		resp.WriteHeader(302)
@@ -191,8 +379,8 @@ func NewTaskViewArgs(taskState *TaskState) *TaskViewArgs {
 		Name: taskState.Name,
 	}
 
-	for _, dbpath := range taskState.DBPaths {
-		ret.DBPaths = append(ret.DBPaths, dbpath[len(taskState.DownloadDir)+1:])
+	for _, dbinfo := range taskState.DBInfo {
+		ret.DBPaths = append(ret.DBPaths, dbinfo.DBPath.LogicalPath)
 	}
 
 	return ret
@@ -247,7 +435,7 @@ func (artifacts *Artifacts) HandlePrintlog(resp http.ResponseWriter, req *http.R
 		return
 	}
 
-	taskName, dbpath := args["task"], args["dbpath"]
+	taskName, logicalDBPath := args["task"], args["dbpath"]
 	taskState, exists := artifacts.tasksCache[taskName]
 	if !exists {
 		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
@@ -255,10 +443,17 @@ func (artifacts *Artifacts) HandlePrintlog(resp http.ResponseWriter, req *http.R
 		return
 	}
 
+	dbpath, err := taskState.FindArtifactPath(logicalDBPath)
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Println("Found DBPath:", dbpath)
+
 	printlogFilename, err := artifacts.EnsureWTDiag(taskState, dbpath)
 	if err != nil {
 		panic(err)
 	}
+	// fmt.Println("Found PrintlogFileName:", printlogFilename)
 
 	printlogFile, err := os.Open(printlogFilename)
 	if err != nil {
@@ -267,5 +462,5 @@ func (artifacts *Artifacts) HandlePrintlog(resp http.ResponseWriter, req *http.R
 	defer printlogFile.Close()
 
 	// TODO: Return the full file.
-	io.CopyN(resp, printlogFile, 10*1000*1000)
+	io.CopyN(resp, printlogFile, 1*1000*1000)
 }

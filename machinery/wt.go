@@ -40,7 +40,7 @@ func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
 		return ret, err
 	}
 
-	ret.PrintlogFile = fmt.Sprintf("%s/printlog", wtDiag.OutputDir)
+	ret.PrintlogFile = wtDiag.OutputDir + "printlog"
 	printlogOut, err := os.Create(ret.PrintlogFile)
 	if err != nil {
 		return ret, err
