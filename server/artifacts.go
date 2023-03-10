@@ -311,7 +311,7 @@ func (artifacts *Artifacts) EnsureEvgArtifacts(taskName string) (*TaskState, err
 }
 
 func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath ArtifactPath) (machinery.WTDiagnosticsResults, error) {
-	if outputDir := GetWtDiagPath(taskState, dbpath); outputDir != "" {
+	if outputDir := GetWtDiagPath(taskState, dbpath); outputDir != "" && false {
 		// Returns the `wtDiagPath/printlog` file.
 		ret := machinery.WTDiagnosticsResults{
 			OutputDir: outputDir,
@@ -319,6 +319,7 @@ func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath ArtifactPa
 			ListFile: outputDir + "list",
 			CatalogFile: outputDir + "catalog",
 			AnnotatedCatalogFile: outputDir + "annotated_catalog",
+			AnnotatedPrintlogFile: outputDir + "annotated_printlog",
 		}
 		return ret, nil
 	}
@@ -351,6 +352,7 @@ func (artifacts *Artifacts) AddHandlers(handlers *http.ServeMux) {
 	handlers.HandleFunc("/task_download", artifacts.HandleTaskDownload)
 	handlers.HandleFunc("/task_view", artifacts.HandleTaskView)
 	handlers.HandleFunc("/printlog", artifacts.HandlePrintlog)
+	handlers.HandleFunc("/fancy_printlog", artifacts.HandleFancyPrintlog)
 	handlers.HandleFunc("/catalog", artifacts.HandleCatalog)
 	handlers.HandleFunc("/list", artifacts.HandleList)
 }
@@ -549,4 +551,48 @@ func (artifacts *Artifacts) HandleList(resp http.ResponseWriter, req *http.Reque
 
 	// TODO: Return the full file.
 	io.CopyN(resp, listFile, 1*1000*1000)
+}
+
+func (artifacts *Artifacts) HandleFancyPrintlog(resp http.ResponseWriter, req *http.Request) {
+	loadTemplates()
+	args, err := GetFormValues(resp, req, "task", "dbpath")
+	if err != nil {
+		fmt.Println("Printlog arg parsing error:", err)
+		return
+	}
+
+	taskName, logicalDBPath := args["task"], args["dbpath"]
+	taskState, exists := artifacts.tasksCache[taskName]
+	if !exists {
+		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
+		resp.WriteHeader(302)
+		return
+	}
+
+	dbpath, err := taskState.FindArtifactPath(logicalDBPath)
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Println("Found DBPath:", dbpath)
+
+	wtDiagRes, err := artifacts.EnsureWTDiag(taskState, dbpath)
+	if err != nil {
+		panic(err)
+	}
+	// fmt.Println("Found PrintlogFileName:", printlogFilename)
+
+	// printlogFile, err := os.Open(wtDiagRes.PrintlogFile)
+	// if err != nil {
+	//  	panic(err)
+	// }
+	// defer printlogFile.Close()
+	// fancyPrintlog, err := os.Create(wtDiagRes.AnnotatedPrintlogFile)
+	// machinery.RewritePrintlog(printlogFile, fancyPrintlog, catalog)
+
+	printlogFile, err := os.Open(wtDiagRes.AnnotatedPrintlogFile)
+	if err != nil {
+		panic(err)
+	}
+	// TODO: Return the full file.
+	io.CopyN(resp, printlogFile, 1*1000*1000)
 }

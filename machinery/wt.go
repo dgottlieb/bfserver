@@ -25,10 +25,11 @@ func NewWTDiagnostics(dbpath string, outputDir string) *WTDiagnostics {
 type WTDiagnosticsResults struct {
 	OutputDir string
 
-	PrintlogFile string
-	ListFile     string
-	CatalogFile  string
-	AnnotatedCatalogFile string
+	PrintlogFile          string
+	ListFile              string
+	CatalogFile           string
+	AnnotatedCatalogFile  string
+	AnnotatedPrintlogFile string
 }
 
 func ReadStderr(stderr io.ReadCloser) string {
@@ -101,11 +102,12 @@ func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
 	}
 
 	ret := WTDiagnosticsResults{
-		OutputDir:    wtDiag.OutputDir,
-		PrintlogFile: wtDiag.OutputDir + "printlog",
-		ListFile:     wtDiag.OutputDir + "list",
-		CatalogFile:  wtDiag.OutputDir + "catalog",
-		AnnotatedCatalogFile: wtDiag.OutputDir + "annotated_catalog",
+		OutputDir:             wtDiag.OutputDir,
+		PrintlogFile:          wtDiag.OutputDir + "printlog",
+		ListFile:              wtDiag.OutputDir + "list",
+		CatalogFile:           wtDiag.OutputDir + "catalog",
+		AnnotatedCatalogFile:  wtDiag.OutputDir + "annotated_catalog",
+		AnnotatedPrintlogFile: wtDiag.OutputDir + "annotated_printlog",
 	}
 
 	printlogCmd := exec.Command(
@@ -137,7 +139,23 @@ func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
 	if err != nil {
 		panic(err)
 	}
-	LoadCatalog(catalogFile, annotatedCatalogFile)
+	catalog := LoadCatalog(catalogFile, annotatedCatalogFile)
+
+	wtListFile, err := os.Open(ret.ListFile)
+	if err != nil {
+		panic(err)
+	}
+	wtList := LoadWTList(wtListFile)
+
+	printlogFile, err := os.Open(ret.PrintlogFile)
+	if err != nil {
+		panic(err)
+	}
+	annotatedPrintlogFile, err := os.Create(ret.AnnotatedPrintlogFile)
+	if err != nil {
+		panic(err)
+	}
+	RewritePrintlog(printlogFile, annotatedPrintlogFile, catalog, wtList)
 
 	return ret, nil
 }

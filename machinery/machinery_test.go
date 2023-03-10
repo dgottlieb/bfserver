@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-
 func TestStartServer(tst *testing.T) {
 	tst.SkipNow()
 
@@ -103,7 +102,13 @@ func TestAnnotate(tst *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	catalog := LoadCatalog(reader)
+	annotatedCatalogFile := "testfiles/wtDiag-rs1-n0/annotated_catalog"
+	writer, err := os.Create(annotatedCatalogFile)
+	if err != nil {
+		panic(err)
+	}
+
+	catalog := LoadCatalog(reader, writer)
 	fmt.Printf("Catalog: %s\n", PPrint(catalog))
 
 	listFile := "testfiles/wtDiag-rs1-n0/list"
@@ -113,4 +118,16 @@ func TestAnnotate(tst *testing.T) {
 	}
 	wtList := LoadWTList(reader)
 	fmt.Printf("List: %s\n", PPrint(wtList))
+
+	printlogFile, err := os.Open("testfiles/wtDiag-rs1-n0/printlog")
+	if err != nil {
+		panic(err)
+	}
+
+	annotatedPrintlogFile, err := os.Create("testfiles/wtDiag-rs1-n0/annotated_printlog")
+	if err != nil {
+		panic(err)
+	}
+
+	RewritePrintlog(printlogFile, annotatedPrintlogFile, catalog, wtList)
 }
