@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -213,9 +214,40 @@ func IsMdbTable(tableName string) bool {
 	return IsCollection(tableName) || IsIndex(tableName) || tableName == ""
 }
 
+func Feed(stdin io.Writer, stdout io.Reader, keystring string) string {
+	stdin.Write([]byte(keystring + "\n"))
+
+	result, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		panic(err)
+	}
+
+	return result
+}
+
 func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalog, list *WTList) {
 	defer input.Close()
 	defer output.Close()
+
+	ksdecodeCmd := exec.Command("/home/dgottlieb/xgen/mongo/bin/ksdecode", "-o", "bson", "-a")
+	ksdecodeStdin, err := ksdecodeCmd.StdinPipe()
+	if err != nil {
+		panic(err)
+	}
+	ksdecodeStdout, err := ksdecodeCmd.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
+
+	if err := ksdecodeCmd.Start(); err != nil {
+		panic(err)
+	}
+	defer func() {
+		ksdecodeStdin.Close()
+		ksdecodeStdout.Close()
+		ksdecodeCmd.Wait()
+	}()
+
 	scanner := bufio.NewScanner(input)
 	scanner.Split(bufio.ScanLines)
 
@@ -223,6 +255,7 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 	// Track which table a key/value pair are associated with. Customize output for MDB collection and indexes.
 	var lastSeenTableName string
 	isRowPut := false
+	var lastSeenIndexInfo *IndexInfo
 	for scanner.Scan() {
 		lineNum += 1
 
@@ -268,32 +301,36 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 			var mdbDisplayName string
 			if collInfo, exists := catalog.FileToCollection[lastSeenTableName]; exists {
 				mdbDisplayName = collInfo.Name
+				lastSeenIndexInfo = nil
 			} else if indexInfo, exists := catalog.FileToIndex[lastSeenTableName]; exists {
 				mdbDisplayName = fmt.Sprintf("NS: %s IndexName: %s Spec: %s",
 					indexInfo.Owner.Name, indexInfo.Name, indexInfo.Definition)
+				lastSeenIndexInfo = indexInfo
 			} else if IsMdbTable(lastSeenTableName) && lastSeenTableName != "_mdb_catalog" {
 				// We could do better here. It's possible the printlog output for the `_mdb_catalog`
 				// has an insert for this table name/ident.
 				mdbDisplayName = "Unknown (dropped?) table"
+				lastSeenIndexInfo = nil
 			}
 
 			// Reconstitute the ".wt" suffix. I assume it's easier for people to digest that
 			// `WiredTiger.wt` is the actual metadata table rather than an ambiguous looking
 			// `WiredTiger`.
 			if exists {
-				output.Write([]byte(fmt.Sprintf("%s.wt %s\n", lastSeenTableName, mdbDisplayName)))
+				output.Write([]byte(fmt.Sprintf(" %s.wt %s\n", lastSeenTableName, mdbDisplayName)))
 			} else {
 				output.Write([]byte("\n"))
 			}
 		} else if strings.HasPrefix(line, "        \"value-hex\": \"") && IsMdbTable(lastSeenTableName) {
 			valueHexStr := line[22 : len(line)-1]
-			valueBinary, err := hex.DecodeString(valueHexStr)
-			if err != nil {
-				panic(err)
-			}
 
 			switch {
-			case lastSeenTableName == "":
+			case lastSeenTableName == "" && isRowPut:
+				valueBinary, err := hex.DecodeString(valueHexStr)
+				if err != nil {
+					panic(err)
+				}
+
 				// Table is unknown because it was no longer in wt list/_mdb_catalog. Try to turn the bytes into bson.
 				byt, err := MayMarshal(valueBinary, "        ")
 				if err == nil {
@@ -303,21 +340,53 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 					output.Write([]byte(line))
 				}
 			case IsCollection(lastSeenTableName) && isRowPut:
+				valueBinary, err := hex.DecodeString(valueHexStr)
+				if err != nil {
+					panic(err)
+				}
+
 				output.Write([]byte("        \"value-bson\": "))
 				PPrintExt(output, valueBinary, "        ")
 			case IsCollection(lastSeenTableName) && !isRowPut:
 				output.Write([]byte(line))
 			case IsIndex(lastSeenTableName):
-				// ksdecode
 				output.Write([]byte(line))
 			default:
 				panic("Unknown? " + lastSeenTableName)
 			}
 
 			output.Write([]byte("\n"))
+		} else if strings.HasPrefix(line, "        \"key-hex\": \"") && IsIndex(lastSeenTableName) {
+			if lastSeenIndexInfo == nil || lastSeenIndexInfo.Name != "_id_" {
+				output.Write([]byte(line + "\n"))
+				continue
+			}
+
+			var keyHexStr string
+			if strings.HasSuffix(line, "\",") {
+				keyHexStr = line[20 : len(line)-2]
+			} else {
+				// `row_remove` operations do not have a value. The `key-hex` field is the last
+				// element in the item.
+				keyHexStr = line[20 : len(line)-1]
+			}
+
+			// fmt.Println("KeyHex:", keyHexStr)
+			keystring := Feed(ksdecodeStdin, ksdecodeStdout, keyHexStr)
+			// fmt.Println("KS:", keystring)
+			output.Write([]byte(line + "\n"))
+			// Note that the keystring output comes with a tailing newline.
+			output.Write([]byte(fmt.Sprintf("        \"Keystring\": %s", FormatKS(keystring))))
 		} else {
 			output.Write([]byte(line))
 			output.Write([]byte("\n"))
 		}
 	}
+}
+
+func FormatKS(keystring string) string {
+	// Inp: 5a1004c72cd25367034a5c98067698e8d95e0f04 { : UUID("c72cd253-6703-4a5c-9806-7698e8d95e0f") }
+	// Out: { : UUID("c72cd253-6703-4a5c-9806-7698e8d95e0f") }
+	_, formatted, _ := strings.Cut(keystring, " ")
+	return formatted
 }
