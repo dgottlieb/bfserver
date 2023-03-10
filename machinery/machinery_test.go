@@ -2,9 +2,11 @@ package machinery
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
+
 
 func TestStartServer(tst *testing.T) {
 	tst.SkipNow()
@@ -70,14 +72,45 @@ func TestGetTaskFromUrl(tst *testing.T) {
 
 func TestWT(tst *testing.T) {
 	// task := "https://spruce.mongodb.com/task/mongodb_mongo_master_enterprise_rhel_80_64_bit_dynamic_all_feature_flags_required_tenant_migration_stepdown_jscore_passthrough_0_linux_enterprise_patch_9c65140283c3f72330a94e58bd9ac2c5bd090ced_63e54b7e9ccd4e19c98bf4c6_23_02_10_19_28_57/files?execution=0&sortBy=STATUS&sortDir=ASC"
-	// dbpaths := FetchArtifactsForTask(GetTaskFromUrl(task), "./tmp/")
+	// dbpaths := FetchArtifactsForTask(GetTaskFromUrl(task), "./testfiles/")
 	// fmt.Println(dbpaths)
-
+	//
 	// dbpath := dbpaths[0]
-	dbpath := "./tmp/dbpath/data/db/job4/rs0/node0"
+	tst.SkipNow()
+	dbpath := "dbpath/data/db/job4/rs0/node0"
 
-	wtDiag := NewWTDiagnostics(dbpath, "test_artifacts")
-	if err := wtDiag.Run(); err != nil {
+	wtDiag := NewWTDiagnostics("./testfiles/"+dbpath, "./testfiles/wtDiag-rs0-n0")
+	wtDiagResults, err := wtDiag.Run()
+	if err != nil {
 		tst.Fatalf("Failed to get diagnostics. Err: %v", err)
 	}
+
+	fmt.Printf("OutputFiles: %#v\n", wtDiagResults)
+}
+
+func TestAnnotate(tst *testing.T) {
+	// dbpath := "dbpath/data/db/job4/rs1/node0"
+	//
+	// wtDiag := NewWTDiagnostics("./testfiles/"+dbpath, "./testfiles/wtDiag-rs1-n0")
+	// wtDiagResults, err := wtDiag.Run()
+	// if err != nil {
+	//  	tst.Fatalf("Failed to get diagnostics. Err: %v", err)
+	// }
+	//
+	// fmt.Printf("OutputFiles: %#v\n", wtDiagResults)
+	catalogFile := "testfiles/wtDiag-rs1-n0/catalog"
+	reader, err := os.Open(catalogFile)
+	if err != nil {
+		panic(err)
+	}
+	catalog := LoadCatalog(reader)
+	fmt.Printf("Catalog: %s\n", PPrint(catalog))
+
+	listFile := "testfiles/wtDiag-rs1-n0/list"
+	reader, err = os.Open(listFile)
+	if err != nil {
+		panic(err)
+	}
+	wtList := LoadWTList(reader)
+	fmt.Printf("List: %s\n", PPrint(wtList))
 }

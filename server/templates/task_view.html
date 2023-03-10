@@ -4,7 +4,12 @@
     <ul>
       {{ $taskName := .Name }}
       {{ range .DBPaths }}
-      <li><a href="printlog?task={{ $taskName }}&dbpath={{ . }}">{{ . }}/</a></li>
+      <li>
+        {{ . }}/
+        <a href="printlog?task={{ $taskName }}&dbpath={{ . }}">printlog</a>
+        <a href="catalog?task={{ $taskName }}&dbpath={{ . }}">catalog</a>
+        <a href="list?task={{ $taskName }}&dbpath={{ . }}">list</a>
+      </li>
       {{ else }}
       No DBPaths
       {{ end }}

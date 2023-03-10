@@ -5,6 +5,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type WTDiagnostics struct {
@@ -13,6 +16,9 @@ type WTDiagnostics struct {
 }
 
 func NewWTDiagnostics(dbpath string, outputDir string) *WTDiagnostics {
+	if !strings.HasSuffix(outputDir, "/") {
+		outputDir = outputDir + "/"
+	}
 	return &WTDiagnostics{dbpath, outputDir}
 }
 
@@ -22,36 +28,42 @@ type WTDiagnosticsResults struct {
 	PrintlogFile string
 	ListFile     string
 	CatalogFile  string
+	AnnotatedCatalogFile string
 }
 
-func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
-	ret := WTDiagnosticsResults{OutputDir: wtDiag.OutputDir}
-
-	printlog := exec.Command("wt", "-C", "log=(compressor=snappy,path=journal),verbose=()", "-h", wtDiag.DBPath, "-r", "printlog", "-u", "-x")
-	fmt.Println("Cmd:", printlog.String())
-
-	readCloser, err := printlog.StdoutPipe()
+func ReadStderr(stderr io.ReadCloser) string {
+	buf, err := io.ReadAll(stderr)
 	if err != nil {
-		return ret, err
+		return fmt.Sprintf("Failed to read stderr. Err: %s", err)
 	}
 
-	err = os.MkdirAll(wtDiag.OutputDir, 0750)
+	return string(buf)
+}
+
+func RunCommand(cmd *exec.Cmd, outputFile string) error {
+	fmt.Println("Cmd:", cmd.String())
+	readCloser, err := cmd.StdoutPipe()
 	if err != nil {
-		return ret, err
+		return err
 	}
 
-	ret.PrintlogFile = wtDiag.OutputDir + "printlog"
-	printlogOut, err := os.Create(ret.PrintlogFile)
+	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return ret, err
-	}
-	defer printlogOut.Close()
-
-	err = printlog.Start()
-	if err != nil {
-		return ret, err
+		return err
 	}
 
+	cmdOut, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+	defer cmdOut.Close()
+
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+
+	var stderr string
 	buf := make([]byte, 10*1024)
 	for {
 		read, err := readCloser.Read(buf)
@@ -60,21 +72,72 @@ func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
 		}
 
 		if err != nil {
-			printlog.Wait()
-			return ret, err
+			stderr = ReadStderr(stderrPipe)
+			cmd.Wait()
+			return err
 		}
 
-		_, err = printlogOut.Write(buf[:read])
+		_, err = cmdOut.Write(buf[:read])
 		if err != nil {
-			printlog.Wait()
-			return ret, err
+			stderr = ReadStderr(stderrPipe)
+			cmd.Wait()
+			return err
 		}
 	}
 
-	err = printlog.Wait()
+	stderr = ReadStderr(stderrPipe)
+	err = cmd.Wait()
 	if err != nil {
-		return ret, err
+		return errors.Wrap(err, stderr)
 	}
+
+	return nil
+}
+
+func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
+	err := os.MkdirAll(wtDiag.OutputDir, 0750)
+	if err != nil {
+		return WTDiagnosticsResults{}, err
+	}
+
+	ret := WTDiagnosticsResults{
+		OutputDir:    wtDiag.OutputDir,
+		PrintlogFile: wtDiag.OutputDir + "printlog",
+		ListFile:     wtDiag.OutputDir + "list",
+		CatalogFile:  wtDiag.OutputDir + "catalog",
+		AnnotatedCatalogFile: wtDiag.OutputDir + "annotated_catalog",
+	}
+
+	printlogCmd := exec.Command(
+		"wt", "-C", "log=(compressor=snappy,path=journal),verbose=()", "-h", wtDiag.DBPath, "-r",
+		"printlog", "-u", "-x")
+	if err := RunCommand(printlogCmd, ret.PrintlogFile); err != nil {
+		return ret, errors.Wrap(err, "Failed to get the WT journal output")
+	}
+
+	listCmd := exec.Command(
+		"wt", "-C", "log=(compressor=snappy,path=journal),verbose=()", "-h", wtDiag.DBPath, "-r",
+		"list", "-v")
+	if err := RunCommand(listCmd, ret.ListFile); err != nil {
+		return ret, errors.Wrap(err, "Failed to get the WT list output")
+	}
+
+	catalogCmd := exec.Command(
+		"wt", "-C", "log=(compressor=snappy,path=journal),verbose=()", "-h", wtDiag.DBPath, "-r",
+		"dump", "-x", "table:_mdb_catalog")
+	if err := RunCommand(catalogCmd, ret.CatalogFile); err != nil {
+		return ret, errors.Wrap(err, "Failed to get the MDB catalog output")
+	}
+
+	catalogFile, err := os.Open(ret.CatalogFile)
+	if err != nil {
+		panic(err)
+	}
+	annotatedCatalogFile, err := os.Create(ret.AnnotatedCatalogFile)
+	if err != nil {
+		panic(err)
+	}
+	LoadCatalog(catalogFile, annotatedCatalogFile)
 
 	return ret, nil
 }
