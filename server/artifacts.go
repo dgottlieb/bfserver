@@ -21,10 +21,10 @@ var artifactTemplates *template.Template
 func loadTemplates() {
 	var err error
 	if artifactTemplates, err = template.ParseFiles(
-		"../server/templates/task_download.html",
-		"../server/templates/404.html",
-		"../server/templates/task_view.html",
-		// "../server/templates/printlog.html",
+		"server/templates/task_download.html",
+		"server/templates/404.html",
+		"server/templates/task_view.html",
+		// "server/templates/printlog.html",
 	); err != nil {
 		panic(err)
 	}

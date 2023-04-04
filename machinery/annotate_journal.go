@@ -258,7 +258,7 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 	defer input.Close()
 	defer output.Close()
 
-	ksdecodeCmd := exec.Command("/home/dgottlieb/xgen/mongo/bin/ksdecode", "-o", "bson", "-a")
+	ksdecodeCmd := exec.Command("ksdecode", "-o", "bson", "-a")
 	ksdecodeStdin, err := ksdecodeCmd.StdinPipe()
 	if err != nil {
 		panic(err)

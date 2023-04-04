@@ -3,3 +3,5 @@
 /machinery/tmp/
 /machinery/testfiles/
 /server/testfiles/
+bfserver
+kanopy_evergreen.yml
