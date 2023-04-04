@@ -357,7 +357,10 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 			valueHexStr := line[22 : len(line)-1]
 
 			switch {
-			case lastSeenTableName == "" && isRowPut:
+			case !isRowPut:
+				// Always output row-modify as raw bytes
+				output.Write([]byte(line))
+			case lastSeenTableName == "":
 				valueBinary, err := hex.DecodeString(valueHexStr)
 				if err != nil {
 					panic(err)
@@ -371,7 +374,7 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 				} else {
 					output.Write([]byte(line))
 				}
-			case IsCollection(lastSeenTableName) && isRowPut:
+			case IsCollection(lastSeenTableName):
 				valueBinary, err := hex.DecodeString(valueHexStr)
 				if err != nil {
 					panic(err)
