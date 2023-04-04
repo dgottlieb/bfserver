@@ -110,6 +110,8 @@ func (wtDiag *WTDiagnostics) Run() (WTDiagnosticsResults, error) {
 		AnnotatedPrintlogFile: wtDiag.OutputDir + "annotated_printlog",
 	}
 
+	fmt.Printf("Writing diagnostic data. Dir: %s\n", ret.OutputDir)
+
 	printlogCmd := exec.Command(
 		"wt", "-C", "log=(compressor=snappy,path=journal),verbose=()", "-h", wtDiag.DBPath, "-r",
 		"printlog", "-u", "-x")

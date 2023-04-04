@@ -314,11 +314,11 @@ func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath ArtifactPa
 	if outputDir := GetWtDiagPath(taskState, dbpath); outputDir != "" && false {
 		// Returns the `wtDiagPath/printlog` file.
 		ret := machinery.WTDiagnosticsResults{
-			OutputDir: outputDir,
-			PrintlogFile: outputDir + "printlog",
-			ListFile: outputDir + "list",
-			CatalogFile: outputDir + "catalog",
-			AnnotatedCatalogFile: outputDir + "annotated_catalog",
+			OutputDir:             outputDir,
+			PrintlogFile:          outputDir + "printlog",
+			ListFile:              outputDir + "list",
+			CatalogFile:           outputDir + "catalog",
+			AnnotatedCatalogFile:  outputDir + "annotated_catalog",
 			AnnotatedPrintlogFile: outputDir + "annotated_printlog",
 		}
 		return ret, nil

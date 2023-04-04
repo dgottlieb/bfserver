@@ -225,6 +225,35 @@ func Feed(stdin io.Writer, stdout io.Reader, keystring string) string {
 	return result
 }
 
+type History struct {
+	Lines []string
+	ptr   int
+}
+
+func NewHistory(cap int) *History {
+	return &History{
+		Lines: make([]string, cap, cap),
+		ptr:   0,
+	}
+}
+
+func (history *History) Add(lineNum int, line string) {
+	history.Lines[history.ptr] = fmt.Sprintf("%6d: %s", lineNum, line)
+	history.ptr++
+
+	if history.ptr == len(history.Lines) {
+		history.ptr = 0
+	}
+}
+
+func (history *History) Dump() {
+	fmt.Println("History:")
+	for num := 0; num < cap(history.Lines); num++ {
+		idx := (num + history.ptr) % cap(history.Lines)
+		fmt.Println("\t" + history.Lines[idx])
+	}
+}
+
 func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalog, list *WTList) {
 	defer input.Close()
 	defer output.Close()
@@ -251,6 +280,7 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 	scanner := bufio.NewScanner(input)
 	scanner.Split(bufio.ScanLines)
 
+	history := NewHistory(20)
 	lineNum := 0
 	// Track which table a key/value pair are associated with. Customize output for MDB collection and indexes.
 	var lastSeenTableName string
@@ -260,6 +290,8 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 		lineNum += 1
 
 		line := scanner.Text()
+		history.Add(lineNum, line)
+
 		switch {
 		case strings.HasPrefix(line, "      { \"optype\": \"row_put\""):
 			isRowPut = true
@@ -347,11 +379,10 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 
 				output.Write([]byte("        \"value-bson\": "))
 				PPrintExt(output, valueBinary, "        ")
-			case IsCollection(lastSeenTableName) && !isRowPut:
-				output.Write([]byte(line))
 			case IsIndex(lastSeenTableName):
 				output.Write([]byte(line))
 			default:
+				history.Dump()
 				panic("Unknown? " + lastSeenTableName)
 			}
 
