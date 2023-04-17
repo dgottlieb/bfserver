@@ -6,7 +6,8 @@
       {{ range .DBPaths }}
       <li>
         {{ . }}/
-        <a href="printlog?task={{ $taskName }}&dbpath={{ . }}">printlog</a>
+        <a href="fancy_printlog?task={{ $taskName }}&dbpath={{ . }}">printlog</a>
+        <a href="printlog?task={{ $taskName }}&dbpath={{ . }}">(raw)</a>
         <a href="catalog?task={{ $taskName }}&dbpath={{ . }}">catalog</a>
         <a href="list?task={{ $taskName }}&dbpath={{ . }}">list</a>
       </li>
