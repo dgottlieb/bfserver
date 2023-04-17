@@ -391,6 +391,13 @@ func RewritePrintlog(input io.ReadCloser, output io.WriteCloser, catalog *Catalo
 
 			output.Write([]byte("\n"))
 		} else if strings.HasPrefix(line, "        \"key-hex\": \"") && IsIndex(lastSeenTableName) {
+			// We can use `ksdecode` to transform:
+			//   "key-hex": "646439840a5abe13336b19449604" ->
+			//   "Keystring": { : ObjectId('6439840a5abe13336b194496') }
+			//
+			// `ksdecode` can accept multiple blobs as input for the same process lifetime,
+			// separated by newlines. However, only one index spec can be used for the entire
+			// process lifetime. So, for now, we only do it for the _id index.
 			if lastSeenIndexInfo == nil || lastSeenIndexInfo.Name != "_id_" {
 				output.Write([]byte(line + "\n"))
 				continue
