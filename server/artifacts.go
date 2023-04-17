@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -230,6 +231,7 @@ func (taskState *TaskState) FullDBPath(dbpath string) string {
 type Artifacts struct {
 	absolutePath string
 	tasksCache   map[string]*TaskState
+	sync.Mutex
 }
 
 func LoadArtifacts(artifactsDir string) (*Artifacts, error) {
@@ -298,12 +300,17 @@ func (artifacts *Artifacts) DownloadTask(taskName string) (*TaskState, error) {
 	}
 	ret.DBInfo = dbinfos
 	// fmt.Printf("Downloaded.\n\tDownloadPath: %v\n\tDBPaths: %v\n\tDBInfos: %v\n", downloadDir, dbpaths, dbinfos)
+	artifacts.Lock()
 	artifacts.tasksCache[taskName] = ret
+	artifacts.Unlock()
 	return ret, nil
 }
 
 func (artifacts *Artifacts) EnsureEvgArtifacts(taskName string) (*TaskState, error) {
-	if taskState, exists := artifacts.tasksCache[taskName]; exists {
+	artifacts.Lock()
+	taskState, exists := artifacts.tasksCache[taskName]
+	artifacts.Unlock()
+	if exists {
 		return taskState, nil
 	}
 
@@ -311,7 +318,7 @@ func (artifacts *Artifacts) EnsureEvgArtifacts(taskName string) (*TaskState, err
 }
 
 func (artifacts *Artifacts) EnsureWTDiag(taskState *TaskState, dbpath ArtifactPath) (machinery.WTDiagnosticsResults, error) {
-	if outputDir := GetWtDiagPath(taskState, dbpath); outputDir != "" && false {
+	if outputDir := GetWtDiagPath(taskState, dbpath); outputDir != "" {
 		// Returns the `wtDiagPath/printlog` file.
 		ret := machinery.WTDiagnosticsResults{
 			OutputDir:             outputDir,
@@ -448,7 +455,9 @@ func (artifacts *Artifacts) HandlePrintlog(resp http.ResponseWriter, req *http.R
 	}
 
 	taskName, logicalDBPath := args["task"], args["dbpath"]
+	artifacts.Lock()
 	taskState, exists := artifacts.tasksCache[taskName]
+	artifacts.Unlock()
 	if !exists {
 		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
 		resp.WriteHeader(302)
@@ -486,7 +495,9 @@ func (artifacts *Artifacts) HandleCatalog(resp http.ResponseWriter, req *http.Re
 	}
 
 	taskName, logicalDBPath := args["task"], args["dbpath"]
+	artifacts.Lock()
 	taskState, exists := artifacts.tasksCache[taskName]
+	artifacts.Unlock()
 	if !exists {
 		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
 		resp.WriteHeader(302)
@@ -525,7 +536,9 @@ func (artifacts *Artifacts) HandleList(resp http.ResponseWriter, req *http.Reque
 	}
 
 	taskName, logicalDBPath := args["task"], args["dbpath"]
+	artifacts.Lock()
 	taskState, exists := artifacts.tasksCache[taskName]
+	artifacts.Unlock()
 	if !exists {
 		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
 		resp.WriteHeader(302)
@@ -562,7 +575,9 @@ func (artifacts *Artifacts) HandleFancyPrintlog(resp http.ResponseWriter, req *h
 	}
 
 	taskName, logicalDBPath := args["task"], args["dbpath"]
+	artifacts.Lock()
 	taskState, exists := artifacts.tasksCache[taskName]
+	artifacts.Unlock()
 	if !exists {
 		resp.Header().Add("Location", fmt.Sprintf("/task_view?task=%s", taskName))
 		resp.WriteHeader(302)
