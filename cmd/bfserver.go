@@ -36,6 +36,18 @@ func main() {
 		return nil
 	})
 
+	fileSystem = os.DirFS("/root/")
+	fs.WalkDir(fileSystem, ".", func(path string, dir fs.DirEntry, err error) error {
+		fmt.Println(path)
+		return nil
+	})
+
+	// evergreenyml, err := ioutil.ReadFile("/root/.evergreen.yml")
+	// if err != nil {
+	//  	panic(err)
+	// }
+	// fmt.Println("Evergreen:\n", string(evergreenyml))
+
 	server := &http.Server{
 		Addr:              "0.0.0.0:8080",
 		Handler:           handler,
