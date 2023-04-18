@@ -1,0 +1,7 @@
+.git/
+tmp/
+machinery/testfiles/
+machinery/tmp/
+server/testfiles
+cache/
+*.go~
