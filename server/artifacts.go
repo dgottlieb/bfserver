@@ -482,7 +482,7 @@ func (artifacts *Artifacts) HandlePrintlog(resp http.ResponseWriter, req *http.R
 	}
 	defer printlogFile.Close()
 
-	io.CopyN(resp, printlogFile)
+	io.Copy(resp, printlogFile)
 }
 
 func (artifacts *Artifacts) HandleCatalog(resp http.ResponseWriter, req *http.Request) {
@@ -522,7 +522,7 @@ func (artifacts *Artifacts) HandleCatalog(resp http.ResponseWriter, req *http.Re
 	}
 	defer catalogFile.Close()
 
-	io.CopyN(resp, catalogFile)
+	io.Copy(resp, catalogFile)
 }
 
 func (artifacts *Artifacts) HandleList(resp http.ResponseWriter, req *http.Request) {
@@ -560,7 +560,7 @@ func (artifacts *Artifacts) HandleList(resp http.ResponseWriter, req *http.Reque
 	}
 	defer listFile.Close()
 
-	io.CopyN(resp, listFile)
+	io.Copy(resp, listFile)
 }
 
 func (artifacts *Artifacts) HandleFancyPrintlog(resp http.ResponseWriter, req *http.Request) {
@@ -607,5 +607,5 @@ func (artifacts *Artifacts) HandleFancyPrintlog(resp http.ResponseWriter, req *h
 	}
 	defer printlogFile.Close()
 
-	io.CopyN(resp, printlogFile)
+	io.Copy(resp, printlogFile)
 }
