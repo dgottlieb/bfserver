@@ -44,7 +44,7 @@ steps:
     api_server: https://api.staging.corp.mongodb.com
     kubernetes_token:
       from_secret: staging_kubernetes_token
-    values: image.tag=git-${DRONE_COMMIT_SHA:0:7},image.repository=795250896452.dkr.ecr.us-east-1.amazonaws.com/core-server/${DRONE_REPO_NAME},ingress.enabled=true,ingress.hosts[0]=dan-web-app.core-server.prod.corp.mongodb.com
+    values: image.tag=git-${DRONE_COMMIT_SHA:0:7},image.repository=795250896452.dkr.ecr.us-east-1.amazonaws.com/core-server/${DRONE_REPO_NAME},ingress.enabled=true,ingress.hosts[0]=dan-web-app.core-server.staging.corp.mongodb.com
     values_files:
     - resources-server.yml
   when:
